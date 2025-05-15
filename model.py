@@ -92,3 +92,38 @@ X_test_highmed = scaler.transform(xtest_selected)
 x_train_scaled = pd.DataFrame(X_train_highmed, columns=features, index=xtrain.index)
 X_test_scaled = pd.DataFrame(X_test_highmed, columns=features, index=xtest.index)
 # Model Training
+
+## svm model creation
+SVM_model = SVC(kernel='poly')
+SVM_model.fit(x_train_scaled, ytrain)
+
+svm_score = SVM_model.score(X_test_scaled, ytest)
+svm_pre = SVM_model.predict(X_test_scaled)
+svm_accuracy = accuracy_score(ytest, svm_pre)
+svm_CMatrix = confusion_matrix(ytest, svm_pre)
+svm_classification_report = classification_report(ytest,svm_pre)
+
+### print section
+print("\nSVM Result: ")
+print(f"SVM Score : {svm_score}")
+print(f"SVM Accuracy : {svm_accuracy}")
+print(f"SVM Confusion Matrix :\n {svm_CMatrix}")
+print(f"SVM Classification Report :\n {svm_classification_report}")
+
+
+## KNN model creation
+KNN_model = KNeighborsClassifier(n_neighbors=3)
+KNN_model.fit(x_train_scaled, ytrain)
+
+knn_score = KNN_model.score(X_test_scaled, ytest)
+knn_pre = KNN_model.predict(X_test_scaled)
+knn_accuracy = accuracy_score(ytest, knn_pre)
+knn_CMatrix = confusion_matrix(ytest, knn_pre)
+knn_classification_report = classification_report(ytest,knn_pre)
+
+### print section
+print("\nKNN Result: ")
+print(f"KNN Score : {knn_score}")
+print(f"KNN Accuracy : {knn_accuracy}")
+print(f"KNN Confusion Matrix :\n {knn_CMatrix}")
+print(f"KNN Classification Report :\n {knn_classification_report}")
