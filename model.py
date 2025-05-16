@@ -2,40 +2,42 @@ import pandas as pd
 import numpy as np
 import matplotlib.pyplot as plt
 import seaborn as sns
-from sklearn.svm import SVR, SVC
+from sklearn.svm import SVC
 from sklearn.preprocessing import StandardScaler, MinMaxScaler
 from sklearn.model_selection import train_test_split
 from sklearn.linear_model import LogisticRegression
 from sklearn.metrics import accuracy_score, confusion_matrix, classification_report
 from sklearn.tree import DecisionTreeClassifier
 from sklearn.neighbors import KNeighborsClassifier
+from sklearn.tree import plot_tree
 
-df = pd.read_csv("heart.csv")  # create the data frame and read data from csv file
-# Data Cleansing
-df["chol"] = pd.to_numeric(
-    df["chol"], errors="coerce"
-)  # convert non numerical values to NaN to be dropped
+df = pd.read_csv("heart.csv")
+
+
+df["chol"] = pd.to_numeric(df["chol"], errors="coerce")
 df.dropna(inplace=True, how="any")
 
 df.info()
+
 df.drop_duplicates(inplace=True)  # drop any duplicates
 
-# print the description after removing the duplicates and transposes the matrix to show all columns
 df.describe(include="all")
-# Extract the X and Y values for the target
-xTarget = df.drop("target", axis=1)
+
+x = df.drop("target", axis=1)
 yTarget = df["target"]
 
 # split the data into train data and test data
 xtrain, xtest, ytrain, ytest = train_test_split(
-    xTarget, yTarget, test_size=0.2, random_state=42
+    x, yTarget, test_size=0.2, random_state=42
 )
+
 # Remove missing values and duplicates from TRAINING data
 xtrain_clean = xtrain.dropna(how="any")
 xtrain_clean = xtrain_clean.drop_duplicates()
 
 xtest_clean = xtest.dropna(how="any")
 xtest_clean = xtest_clean.drop_duplicates()
+
 # calculate the IQR to remove outliers
 Q1 = df.quantile(0.25)
 Q3 = df.quantile(0.75)
@@ -44,22 +46,19 @@ IQR = Q3 - Q1
 lower_bound = Q1 - 1.5 * IQR
 upper_bound = Q3 + 1.5 * IQR
 
-
-# Clip outliers in TRAINING data
 xtest_clean = xtest_clean.clip(lower=lower_bound, upper=upper_bound, axis=1)
 
 
 df.describe(include="all")
-# Feature Selection
-# Calculate Z-scores for all numerical columns
+
 numeric_cols = xtrain_clean.select_dtypes(include=["number"]).columns
 numeric_cols = [col for col in numeric_cols if col != "target"]  # Exclude 'target'
 z_scores = xtrain_clean[numeric_cols].apply(lambda x: np.abs((x - x.mean()) / x.std()))
 mean_z_scores = z_scores.mean().sort_values(ascending=False)
 
-# Display Z-scores for each column
 print("Z-scores for each column:")
 print(mean_z_scores)
+
 n_features = len(mean_z_scores)
 high_priority = mean_z_scores[: n_features // 3].index.tolist()
 medium_priority = mean_z_scores[n_features // 3 : 2 * (n_features // 3)].index.tolist()
@@ -74,31 +73,23 @@ xtest_selected = xtest_clean.drop(low_priority_to_drop, axis=1)
 
 features = high_priority + medium_priority
 print(features)
-#                      Scalling Data
-# converts the data into ranges between 0 and 1 used for KNN and SVM
+
 minMaxScaler = MinMaxScaler()
 
-# fitting the High Priority Data
 xTrain_highmd = minMaxScaler.fit_transform(xtrain_selected)
 xTest_highmd = minMaxScaler.transform(xtest_selected)
 
-# converting the fitted data into data frames to be easier for tracking
 xTrain_df = pd.DataFrame(xTrain_highmd, columns=features, index=xtrain.index)
 xTest_df = pd.DataFrame(xTest_highmd, columns=features, index=xtest.index)
 
-# to convert data into Z-Score values to be used in logistic regression and decision tree
 scaler = StandardScaler()
 
-# fitting the High Priority Data
 X_train_highmed = scaler.fit_transform(xtrain_selected)
 X_test_highmed = scaler.transform(xtest_selected)
 
-# recreating the data into data frames to be easier for tracking
 x_train_scaled = pd.DataFrame(X_train_highmed, columns=features, index=xtrain.index)
 X_test_scaled = pd.DataFrame(X_test_highmed, columns=features, index=xtest.index)
-# Model Training
 
-## svm model creation
 SVM_model = SVC(kernel="poly")
 SVM_model.fit(x_train_scaled, ytrain)
 
@@ -108,15 +99,6 @@ svm_accuracy = accuracy_score(ytest, svm_pre)
 svm_CMatrix = confusion_matrix(ytest, svm_pre)
 svm_classification_report = classification_report(ytest, svm_pre)
 
-### print section
-print("\nSVM Result: ")
-print(f"SVM Score : {svm_score}")
-print(f"SVM Accuracy : {svm_accuracy}")
-print(f"SVM Confusion Matrix :\n {svm_CMatrix}")
-print(f"SVM Classification Report :\n {svm_classification_report}")
-
-
-## KNN model creation
 KNN_model = KNeighborsClassifier(n_neighbors=3)
 KNN_model.fit(x_train_scaled, ytrain)
 
@@ -126,19 +108,32 @@ knn_accuracy = accuracy_score(ytest, knn_pre)
 knn_CMatrix = confusion_matrix(ytest, knn_pre)
 knn_classification_report = classification_report(ytest, knn_pre)
 
-### print section
-print("\nKNN Result: ")
-print(f"KNN Score : {knn_score}")
-print(f"KNN Accuracy : {knn_accuracy}")
-print(f"KNN Confusion Matrix :\n {knn_CMatrix}")
-print(f"KNN Classification Report :\n {knn_classification_report}")
+log_model = LogisticRegression()
+log_model.fit(x_train_scaled, ytrain)
 
-logreg_accuracy = 0.8  # Will change after make the models
-dt_accuracy = 0.85  # Will change after make the models
+log_score = log_model.score(X_test_scaled, ytest)
+log_pre = log_model.predict(X_test_scaled)
+log_accuracy = accuracy_score(ytest, log_pre)
+log_CMatrix = confusion_matrix(ytest, log_pre)
+log_classification_report = classification_report(ytest, log_pre)
+
+tree_model = DecisionTreeClassifier(random_state=21)
+tree_model.fit(x_train_scaled, ytrain)
+
+tree_score = tree_model.score(X_test_scaled, ytest)
+tree_pre = tree_model.predict(X_test_scaled)
+tree_accuracy = accuracy_score(ytest, tree_pre)
+tree_CMatrix = confusion_matrix(ytest, tree_pre)
+tree_classification_report = classification_report(ytest, tree_pre)
+
 model_names = ["SVM", "KNN", "Logistic Regression", "Decision Tree"]
-accuracies = [svm_accuracy, knn_accuracy, logreg_accuracy, dt_accuracy]
+accuracies = [svm_accuracy, knn_accuracy, log_accuracy, tree_accuracy]
+correlation_matrix = df.corr()
 
-# Make the figure to show each model accuracy
+plt.figure(figsize=(20, 10))
+plot_tree(tree_model, feature_names=features, class_names=["0", "1"], filled=True)
+plt.show()
+
 plt.figure(figsize=(10, 6))
 bars = plt.bar(
     model_names, accuracies, color=["#1f77b4", "#ff7f0e", "#2ca02c", "#d62728"]
@@ -148,7 +143,6 @@ plt.ylabel("Accuracy", fontsize=12)
 plt.title("Model Accuracy Comparison", fontsize=14)
 plt.ylim(0.65, 0.90)
 
-# Add values of accuracies on top of bars
 for bar in bars:
     height = bar.get_height()
     plt.text(
@@ -163,10 +157,6 @@ plt.grid(axis="y", linestyle="--", alpha=0.7)
 plt.tight_layout()
 plt.show()
 
-# Correlation Matrix
-correlation_matrix = df.corr()
-
-# Make the figure to show the heat map between the features and the target
 plt.figure(figsize=(12, 10))
 sns.heatmap(
     correlation_matrix,
@@ -184,11 +174,15 @@ plt.yticks(fontsize=10)
 plt.tight_layout()
 plt.show()
 
-# Make the figure to show confusion matrices for the models
 plt.figure(figsize=(14, 12))
 plt.suptitle("Confusion Matrices Comparison", y=1.02, fontsize=16)
 
-models = [("SVM", svm_CMatrix), ("KNN", knn_CMatrix)]
+models = [
+    ("SVM", svm_CMatrix),
+    ("KNN", knn_CMatrix),
+    ("Logistic Regression", log_CMatrix),
+    ("Decision Tree", tree_CMatrix),
+]
 
 for idx, (model_name, matrix) in enumerate(models, 1):
     plt.subplot(2, 2, idx)
