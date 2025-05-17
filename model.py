@@ -1,199 +1,198 @@
+import streamlit as st
 import pandas as pd
 import numpy as np
 import matplotlib.pyplot as plt
 import seaborn as sns
 from sklearn.svm import SVC
-from sklearn.preprocessing import StandardScaler, MinMaxScaler
+from sklearn.preprocessing import StandardScaler
 from sklearn.model_selection import train_test_split
 from sklearn.linear_model import LogisticRegression
-from sklearn.metrics import accuracy_score, confusion_matrix, classification_report
-from sklearn.tree import DecisionTreeClassifier
 from sklearn.neighbors import KNeighborsClassifier
-from sklearn.tree import plot_tree
+from sklearn.tree import DecisionTreeClassifier, plot_tree
+from sklearn.ensemble import VotingClassifier
+from sklearn.metrics import accuracy_score, confusion_matrix, classification_report
 
-df = pd.read_csv("heart.csv")
+@st.cache_data
+def load_and_train():
+    # Load and preprocess data
+    df = pd.read_csv("heart.csv")
+    df["chol"] = pd.to_numeric(df["chol"], errors="coerce")
+    df.dropna(inplace=True)
+    df.drop_duplicates(inplace=True)
 
+    # Split data
+    x = df.drop("target", axis=1)
+    y = df["target"]
+    xtrain, xtest, ytrain, ytest = train_test_split(x, y, test_size=0.2, random_state=42)
 
-df["chol"] = pd.to_numeric(df["chol"], errors="coerce")
-df.dropna(inplace=True, how="any")
+    # Feature selection
+    numeric_cols = xtrain.select_dtypes(include=["number"]).columns
+    z_scores = xtrain[numeric_cols].apply(lambda x: np.abs((x - x.mean()) / x.std()))
+    mean_z_scores = z_scores.mean().sort_values(ascending=False)
 
-df.info()
+    n_features = len(mean_z_scores)
+    low_priority = mean_z_scores[2 * (n_features // 3):].index.tolist()
+    xtrain_selected = xtrain.drop(low_priority, axis=1)
+    xtest_selected = xtest.drop(low_priority, axis=1)
+    features = xtrain_selected.columns.tolist()
 
-df.drop_duplicates(inplace=True)  # drop any duplicates
+    # Preprocessing
+    scaler = StandardScaler()
+    X_train_scaled = scaler.fit_transform(xtrain_selected)
+    X_test_scaled = scaler.transform(xtest_selected)
 
-df.describe(include="all")
+    # Train individual models
+    svm = SVC(kernel="poly", probability=True)
+    knn = KNeighborsClassifier(n_neighbors=3)
+    lr = LogisticRegression()
+    dt = DecisionTreeClassifier(random_state=21)
 
-x = df.drop("target", axis=1)
-yTarget = df["target"]
+    models = {
+        'SVM': svm.fit(X_train_scaled, ytrain),
+        'KNN': knn.fit(X_train_scaled, ytrain),
+        'Logistic Regression': lr.fit(X_train_scaled, ytrain),
+        'Decision Tree': dt.fit(X_train_scaled, ytrain)
+    }
 
-# split the data into train data and test data
-xtrain, xtest, ytrain, ytest = train_test_split(
-    x, yTarget, test_size=0.2, random_state=42
-)
-
-# Remove missing values and duplicates from TRAINING data
-xtrain_clean = xtrain.dropna(how="any")
-xtrain_clean = xtrain_clean.drop_duplicates()
-
-xtest_clean = xtest.dropna(how="any")
-xtest_clean = xtest_clean.drop_duplicates()
-
-# calculate the IQR to remove outliers
-Q1 = df.quantile(0.25)
-Q3 = df.quantile(0.75)
-IQR = Q3 - Q1
-
-lower_bound = Q1 - 1.5 * IQR
-upper_bound = Q3 + 1.5 * IQR
-
-xtest_clean = xtest_clean.clip(lower=lower_bound, upper=upper_bound, axis=1)
-
-
-df.describe(include="all")
-
-numeric_cols = xtrain_clean.select_dtypes(include=["number"]).columns
-numeric_cols = [col for col in numeric_cols if col != "target"]  # Exclude 'target'
-z_scores = xtrain_clean[numeric_cols].apply(lambda x: np.abs((x - x.mean()) / x.std()))
-mean_z_scores = z_scores.mean().sort_values(ascending=False)
-
-print("Z-scores for each column:")
-print(mean_z_scores)
-
-n_features = len(mean_z_scores)
-high_priority = mean_z_scores[: n_features // 3].index.tolist()
-medium_priority = mean_z_scores[n_features // 3 : 2 * (n_features // 3)].index.tolist()
-low_priority = mean_z_scores[2 * (n_features // 3) :].index.tolist()
-
-print(high_priority)
-print(medium_priority)
-print(low_priority)
-low_priority_to_drop = [col for col in low_priority if col in xtrain_clean.columns]
-xtrain_selected = xtrain_clean.drop(low_priority_to_drop, axis=1)
-xtest_selected = xtest_clean.drop(low_priority_to_drop, axis=1)
-
-features = high_priority + medium_priority
-print(features)
-
-minMaxScaler = MinMaxScaler()
-
-xTrain_highmd = minMaxScaler.fit_transform(xtrain_selected)
-xTest_highmd = minMaxScaler.transform(xtest_selected)
-
-xTrain_df = pd.DataFrame(xTrain_highmd, columns=features, index=xtrain.index)
-xTest_df = pd.DataFrame(xTest_highmd, columns=features, index=xtest.index)
-
-scaler = StandardScaler()
-
-X_train_highmed = scaler.fit_transform(xtrain_selected)
-X_test_highmed = scaler.transform(xtest_selected)
-
-x_train_scaled = pd.DataFrame(X_train_highmed, columns=features, index=xtrain.index)
-X_test_scaled = pd.DataFrame(X_test_highmed, columns=features, index=xtest.index)
-
-SVM_model = SVC(kernel="poly")
-SVM_model.fit(x_train_scaled, ytrain)
-
-svm_score = SVM_model.score(X_test_scaled, ytest)
-svm_pre = SVM_model.predict(X_test_scaled)
-svm_accuracy = accuracy_score(ytest, svm_pre)
-svm_CMatrix = confusion_matrix(ytest, svm_pre)
-svm_classification_report = classification_report(ytest, svm_pre)
-
-KNN_model = KNeighborsClassifier(n_neighbors=3)
-KNN_model.fit(x_train_scaled, ytrain)
-
-knn_score = KNN_model.score(X_test_scaled, ytest)
-knn_pre = KNN_model.predict(X_test_scaled)
-knn_accuracy = accuracy_score(ytest, knn_pre)
-knn_CMatrix = confusion_matrix(ytest, knn_pre)
-knn_classification_report = classification_report(ytest, knn_pre)
-
-log_model = LogisticRegression()
-log_model.fit(x_train_scaled, ytrain)
-
-log_score = log_model.score(X_test_scaled, ytest)
-log_pre = log_model.predict(X_test_scaled)
-log_accuracy = accuracy_score(ytest, log_pre)
-log_CMatrix = confusion_matrix(ytest, log_pre)
-log_classification_report = classification_report(ytest, log_pre)
-
-tree_model = DecisionTreeClassifier(random_state=21)
-tree_model.fit(x_train_scaled, ytrain)
-
-tree_score = tree_model.score(X_test_scaled, ytest)
-tree_pre = tree_model.predict(X_test_scaled)
-tree_accuracy = accuracy_score(ytest, tree_pre)
-tree_CMatrix = confusion_matrix(ytest, tree_pre)
-tree_classification_report = classification_report(ytest, tree_pre)
-
-model_names = ["SVM", "KNN", "Logistic Regression", "Decision Tree"]
-accuracies = [svm_accuracy, knn_accuracy, log_accuracy, tree_accuracy]
-correlation_matrix = df.corr()
-
-plt.figure(figsize=(20, 10))
-plot_tree(tree_model, feature_names=features, class_names=["0", "1"], filled=True)
-plt.show()
-
-plt.figure(figsize=(10, 6))
-bars = plt.bar(
-    model_names, accuracies, color=["#1f77b4", "#ff7f0e", "#2ca02c", "#d62728"]
-)
-
-plt.ylabel("Accuracy", fontsize=12)
-plt.title("Model Accuracy Comparison", fontsize=14)
-plt.ylim(0.65, 0.90)
-
-for bar in bars:
-    height = bar.get_height()
-    plt.text(
-        bar.get_x() + bar.get_width() / 2,
-        height,
-        f"{height:.2f}",
-        ha="center",
-        va="bottom",
+    # Create voting classifier
+    voting = VotingClassifier(
+        estimators=[
+            ('svm', svm),
+            ('knn', knn),
+            ('lr', lr),
+            ('dt', dt)
+        ],
+        voting='soft'
     )
+    voting.fit(X_train_scaled, ytrain)
+    models['Voting Classifier'] = voting
 
-plt.grid(axis="y", linestyle="--", alpha=0.7)
-plt.tight_layout()
-plt.show()
+    # Calculate accuracies
+    accuracies = {}
+    for name, model in models.items():
+        ypred = model.predict(X_test_scaled)
+        accuracies[name] = accuracy_score(ytest, ypred)
 
-plt.figure(figsize=(12, 10))
-sns.heatmap(
-    correlation_matrix,
-    annot=True,
-    fmt=".2f",
-    cmap="coolwarm",
-    cbar_kws={"label": "Correlation Coefficient"},
-    linewidths=0.5,
-    annot_kws={"size": 10},
-)
+    # Generate plots
+    fig1, ax1 = plt.subplots(figsize=(10, 6))
+    bars = ax1.bar(accuracies.keys(), accuracies.values(), color=["skyblue", "lightgreen", "lightcoral", "darkcyan", "lightgray"])
+    ax1.set_ylim(0.65, 0.90)
+    ax1.set_title("Model Accuracy Comparison")
+    ax1.set_ylabel("Accuracy")
+    for bar in bars:
+        height = bar.get_height()
+        ax1.text(
+            bar.get_x() + bar.get_width() / 2,
+            height,
+            f"{height:.2f}",
+            ha="center",
+            va="bottom",
+        )
 
-plt.title("Feature Correlation Matrix with Target", fontsize=14)
-plt.xticks(rotation=45, ha="right", fontsize=10)
-plt.yticks(fontsize=10)
-plt.tight_layout()
-plt.show()
+    fig2, ax2 = plt.subplots(figsize=(12, 10))
+    sns.heatmap(df.corr(), annot=True, fmt=".2f", cmap="coolwarm", ax=ax2)
+    ax2.set_title("Feature Correlation Matrix")
 
-plt.figure(figsize=(14, 12))
-plt.suptitle("Confusion Matrices Comparison", y=1.02, fontsize=16)
+    fig3, ax3 = plt.subplots(figsize=(20, 10))
+    plot_tree(dt, feature_names=features, class_names=["0", "1"], filled=True, ax=ax3)
 
-models = [
-    ("SVM", svm_CMatrix),
-    ("KNN", knn_CMatrix),
-    ("Logistic Regression", log_CMatrix),
-    ("Decision Tree", tree_CMatrix),
-]
+    fig4, axs = plt.subplots(2, 2, figsize=(14, 12))
+    for idx, (name, model) in enumerate(models.items()):
+        if name == 'Voting Classifier': continue
+        cm = confusion_matrix(ytest, model.predict(X_test_scaled))
+        sns.heatmap(cm, annot=True, fmt="d", cmap="Blues", ax=axs[idx // 2, idx % 2])
+        axs[idx // 2, idx % 2].set_title(name)
 
-for idx, (model_name, matrix) in enumerate(models, 1):
-    plt.subplot(2, 2, idx)
-    sns.heatmap(
-        matrix, annot=True, fmt="d", cmap="Blues", cbar=False, annot_kws={"size": 14}
-    )
-    plt.title(f"{model_name}", fontweight="bold", pad=12)
-    plt.xlabel("Predicted Label", fontsize=12)
-    plt.ylabel("True Label", fontsize=12)
-    plt.xticks([0.5, 1.5], ["No Heart Disease", "Heart Disease"], rotation=0)
-    plt.yticks([0.5, 1.5], ["No Heart Disease", "Heart Disease"], rotation=0)
+    return {
+        'models': models,
+        'scaler': scaler,
+        'features': features,
+        'plots': {
+            'accuracy': fig1,
+            'correlation': fig2,
+            'tree': fig3,
+            'confusion': fig4
+        },
+        'accuracies': accuracies
+    }
 
-plt.tight_layout()
-plt.show()
+
+# Load models and artifacts
+artifacts = load_and_train()
+
+# Streamlit GUI
+st.title("Heart Disease Prediction")
+st.sidebar.header("Patient Information")
+
+# Input mappings
+cp_options = {
+    'Typical Angina': 0,
+    'Atypical Angina': 1,
+    'Non-anginal Pain': 2,
+    'Asymptomatic': 3
+}
+
+thal_options = {
+    'Normal': 1,
+    'Fixed Defect': 2,
+    'Reversible Defect': 3
+}
+
+# Create input dictionary
+input_data = {}
+for feature in artifacts['features']:
+    match feature:
+        case 'age':
+            input_data[feature] = st.sidebar.number_input('Age', 0, 100, 21)
+        case 'sex':
+            input_data[feature] = 1 if st.sidebar.selectbox('Sex', ['Male', 'Female']) == 'Male' else 0
+        case 'cp':
+            input_data[feature] = cp_options[st.sidebar.selectbox('Chest Pain Type', list(cp_options.keys()))]
+        case 'trestbps':
+            input_data[feature] = st.sidebar.number_input('Resting BP (mmHg)', 90, 200, 120)
+        case 'chol':
+            input_data[feature] = st.sidebar.number_input('Cholesterol (mg/dl)', 100, 600, 200)
+        case 'fbs':
+            input_data[feature] = st.sidebar.selectbox('Fasting Blood Sugar > 120mg/dl', [0, 1])
+        case 'restecg':
+            input_data[feature] = st.sidebar.selectbox('Resting ECG', [0, 1, 2])
+        case 'thalach':
+            input_data[feature] = st.sidebar.number_input('Max Heart Rate', 60, 220, 150)
+        case 'exang':
+            input_data[feature] = st.sidebar.selectbox('Exercise Induced Angina', [0, 1])
+        case 'oldpeak':
+            input_data[feature] = st.sidebar.number_input('ST Depression', 0.0, 6.2, 0.0)
+        case 'slope':
+            input_data[feature] = st.sidebar.selectbox('ST Slope', [0, 1, 2])
+        case 'ca':
+            input_data[feature] = st.sidebar.slider('Major Vessels', 0, 3, 0)
+        case 'thal':
+            input_data[feature] = thal_options[st.sidebar.selectbox('Thalassemia', list(thal_options.keys()))]
+
+# Create DataFrame and preprocess
+input_df = pd.DataFrame([input_data])[artifacts['features']]
+input_scaled = artifacts['scaler'].transform(input_df)
+
+# Model selection and prediction
+model_name = st.sidebar.selectbox("Select Model", list(artifacts['models'].keys()), 4)
+model = artifacts['models'][model_name]
+
+if st.sidebar.button('Predict'):
+    prediction = model.predict(input_scaled)[0]
+    st.sidebar.subheader("Result")
+    if prediction == 1:
+        st.sidebar.error("High risk of heart disease")
+    else:
+        st.sidebar.success("Low risk of heart disease")
+
+st.subheader("Accuracy Comparison")
+st.pyplot(artifacts['plots']['accuracy'])
+
+st.subheader("Feature Correlation Matrix")
+st.pyplot(artifacts['plots']['correlation'])
+
+st.subheader("Decision Tree Visualization")
+st.pyplot(artifacts['plots']['tree'])
+
+st.subheader("Confusion Matrices")
+st.pyplot(artifacts['plots']['confusion'])
