@@ -10,7 +10,56 @@ from sklearn.linear_model import LogisticRegression
 from sklearn.neighbors import KNeighborsClassifier
 from sklearn.tree import DecisionTreeClassifier, plot_tree
 from sklearn.ensemble import VotingClassifier
-from sklearn.metrics import accuracy_score, confusion_matrix, classification_report
+from sklearn.metrics import accuracy_score, confusion_matrix
+
+# Cache the plot generation separately with persist=True
+@st.cache_data(persist=True)
+def generate_plots(models, X_test_scaled, ytest, df, dt, features):
+    # Accuracy comparison plot
+    accuracies = {name: accuracy_score(ytest, model.predict(X_test_scaled)) 
+                 for name, model in models.items()}
+    
+    fig1, ax1 = plt.subplots(figsize=(10, 6))
+    bars = ax1.bar(accuracies.keys(), accuracies.values(), 
+                  color=["skyblue", "lightgreen", "lightcoral", "darkcyan", "lightgray"])
+    ax1.set_ylim(0.65, 0.90)
+    ax1.set_title("Model Accuracy Comparison")
+    ax1.set_ylabel("Accuracy")
+    for bar in bars:
+        height = bar.get_height()
+        ax1.text(
+            bar.get_x() + bar.get_width() / 2,
+            height,
+            f"{height:.2f}",
+            ha="center",
+            va="bottom",
+        )
+
+    # Correlation matrix
+    fig2, ax2 = plt.subplots(figsize=(12, 10))
+    sns.heatmap(df.corr(), annot=True, fmt=".2f", cmap="coolwarm", ax=ax2)
+    ax2.set_title("Feature Correlation Matrix")
+
+    # Decision tree visualization
+    fig3, ax3 = plt.subplots(figsize=(20, 10))
+    plot_tree(dt, feature_names=features, class_names=["0", "1"], filled=True, ax=ax3)
+
+    # Confusion matrices
+    fig4, axs = plt.subplots(2, 2, figsize=(14, 12))
+    for idx, (name, model) in enumerate(models.items()):
+        if name == 'Voting Classifier': 
+            continue
+        cm = confusion_matrix(ytest, model.predict(X_test_scaled))
+        sns.heatmap(cm, annot=True, fmt="d", cmap="Blues", ax=axs[idx // 2, idx % 2])
+        axs[idx // 2, idx % 2].set_title(name)
+
+    return {
+        'accuracy': fig1,
+        'correlation': fig2,
+        'tree': fig3,
+        'confusion': fig4,
+        'accuracies': accuracies
+    }
 
 @st.cache_data
 def load_and_train():
@@ -45,7 +94,7 @@ def load_and_train():
     svm = SVC(kernel="poly", probability=True)
     knn = KNeighborsClassifier(n_neighbors=3)
     lr = LogisticRegression()
-    dt = DecisionTreeClassifier(random_state=21)
+    dt = DecisionTreeClassifier(random_state=42, max_depth=6)
 
     models = {
         'SVM': svm.fit(X_train_scaled, ytrain),
@@ -67,55 +116,21 @@ def load_and_train():
     voting.fit(X_train_scaled, ytrain)
     models['Voting Classifier'] = voting
 
-    # Calculate accuracies
-    accuracies = {}
-    for name, model in models.items():
-        ypred = model.predict(X_test_scaled)
-        accuracies[name] = accuracy_score(ytest, ypred)
-
-    # Generate plots
-    fig1, ax1 = plt.subplots(figsize=(10, 6))
-    bars = ax1.bar(accuracies.keys(), accuracies.values(), color=["skyblue", "lightgreen", "lightcoral", "darkcyan", "lightgray"])
-    ax1.set_ylim(0.65, 0.90)
-    ax1.set_title("Model Accuracy Comparison")
-    ax1.set_ylabel("Accuracy")
-    for bar in bars:
-        height = bar.get_height()
-        ax1.text(
-            bar.get_x() + bar.get_width() / 2,
-            height,
-            f"{height:.2f}",
-            ha="center",
-            va="bottom",
-        )
-
-    fig2, ax2 = plt.subplots(figsize=(12, 10))
-    sns.heatmap(df.corr(), annot=True, fmt=".2f", cmap="coolwarm", ax=ax2)
-    ax2.set_title("Feature Correlation Matrix")
-
-    fig3, ax3 = plt.subplots(figsize=(20, 10))
-    plot_tree(dt, feature_names=features, class_names=["0", "1"], filled=True, ax=ax3)
-
-    fig4, axs = plt.subplots(2, 2, figsize=(14, 12))
-    for idx, (name, model) in enumerate(models.items()):
-        if name == 'Voting Classifier': continue
-        cm = confusion_matrix(ytest, model.predict(X_test_scaled))
-        sns.heatmap(cm, annot=True, fmt="d", cmap="Blues", ax=axs[idx // 2, idx % 2])
-        axs[idx // 2, idx % 2].set_title(name)
+    # Generate plots (now using the separate cached function)
+    plot_data = generate_plots(models, X_test_scaled, ytest, df, dt, features)
 
     return {
         'models': models,
         'scaler': scaler,
         'features': features,
         'plots': {
-            'accuracy': fig1,
-            'correlation': fig2,
-            'tree': fig3,
-            'confusion': fig4
+            'accuracy': plot_data['accuracy'],
+            'correlation': plot_data['correlation'],
+            'tree': plot_data['tree'],
+            'confusion': plot_data['confusion']
         },
-        'accuracies': accuracies
+        'accuracies': plot_data['accuracies']
     }
-
 
 # Load models and artifacts
 artifacts = load_and_train()
@@ -126,10 +141,10 @@ st.sidebar.header("Patient Information")
 
 # Input mappings
 cp_options = {
-    'Typical Angina': 0,
-    'Atypical Angina': 1,
-    'Non-anginal Pain': 2,
-    'Asymptomatic': 3
+    'No Pain': 0,
+    'Low Pain': 1,
+    'Medium Pain': 2,
+    'Hard Pain': 3
 }
 
 thal_options = {
@@ -143,15 +158,15 @@ input_data = {}
 for feature in artifacts['features']:
     match feature:
         case 'age':
-            input_data[feature] = st.sidebar.number_input('Age', 0, 100, 21)
+            input_data[feature] = st.sidebar.number_input('Age', 0, 150, 21)
         case 'sex':
             input_data[feature] = 1 if st.sidebar.selectbox('Sex', ['Male', 'Female']) == 'Male' else 0
         case 'cp':
             input_data[feature] = cp_options[st.sidebar.selectbox('Chest Pain Type', list(cp_options.keys()))]
         case 'trestbps':
-            input_data[feature] = st.sidebar.number_input('Resting BP (mmHg)', 90, 200, 120)
+            input_data[feature] = st.sidebar.number_input('Resting BP (mmHg)', 50, 250, 120)
         case 'chol':
-            input_data[feature] = st.sidebar.number_input('Cholesterol (mg/dl)', 100, 600, 200)
+            input_data[feature] = st.sidebar.number_input('Cholesterol (mg/dl)', 50, 700, 200)
         case 'fbs':
             input_data[feature] = st.sidebar.selectbox('Fasting Blood Sugar > 120mg/dl', [0, 1])
         case 'restecg':
@@ -185,14 +200,19 @@ if st.sidebar.button('Predict'):
     else:
         st.sidebar.success("Low risk of heart disease")
 
-st.subheader("Accuracy Comparison")
-st.pyplot(artifacts['plots']['accuracy'])
+# Display plots (these will now remain static)
+@st.cache_data
+def show_plots():
+    st.subheader("Accuracy Comparison")
+    st.pyplot(artifacts['plots']['accuracy'])
 
-st.subheader("Feature Correlation Matrix")
-st.pyplot(artifacts['plots']['correlation'])
+    st.subheader("Feature Correlation Matrix")
+    st.pyplot(artifacts['plots']['correlation'])
 
-st.subheader("Decision Tree Visualization")
-st.pyplot(artifacts['plots']['tree'])
+    st.subheader("Decision Tree Visualization")
+    st.pyplot(artifacts['plots']['tree'])
 
-st.subheader("Confusion Matrices")
-st.pyplot(artifacts['plots']['confusion'])
+    st.subheader("Confusion Matrices")
+    st.pyplot(artifacts['plots']['confusion'])
+
+show_plots()
